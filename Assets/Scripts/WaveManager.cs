@@ -1,7 +1,7 @@
 using System.Collections;
 using UnityEngine;
 using TMPro;
-using UnityEngine.SceneManagement; 
+using UnityEngine.SceneManagement;
 
 public class WaveManager : MonoBehaviour
 {
@@ -20,17 +20,21 @@ public class WaveManager : MonoBehaviour
     public TextMeshProUGUI waveText;
     public float waveTextDuration = 2f;
 
+    [Header("Win Scene")]
+    public WinLoader winLoader; // drag your GameManager (with WinLoader) here
+    public bool clearSaveOnWin = true;
+
     private int currentWaveIndex = -1;
     private int aliveCount = 0;
 
     private Coroutine waveTextRoutine;
 
-    // ✅ NEW: save system reference
+    // save system reference
     private WaveProgressSave waveSave;
 
     void Start()
     {
-        // ✅ NEW: get saver + load saved wave
+        // get saver + load saved wave
         waveSave = GetComponent<WaveProgressSave>();
 
         int savedWave = (waveSave != null) ? waveSave.LoadWave() : 1; // 1..N
@@ -43,22 +47,36 @@ public class WaveManager : MonoBehaviour
     {
         currentWaveIndex++;
 
+        // ✅ WIN CONDITION: finished all waves
         if (currentWaveIndex >= enemiesPerWave.Length)
         {
-            Debug.Log("All waves cleared!");
+            Debug.Log("All waves cleared! YOU WIN!");
 
-            // ✅ NEW (optional): clear save when game finished
-            if (waveSave != null) waveSave.ClearSave();
+            // optional: clear save when game finished
+            if (clearSaveOnWin && waveSave != null)
+                waveSave.ClearSave();
+
+            // load win scene
+            if (winLoader != null)
+            {
+                winLoader.LoadWinScene();
+            }
+            else
+            {
+                Debug.LogError("WinLoader not assigned in WaveManager. Assign it in Inspector!");
+                // fallback (optional): direct load if you want
+                // SceneManager.LoadScene("WinScene");
+            }
 
             return;
         }
 
         int waveNumber = currentWaveIndex + 1;
 
-        // ✅ NEW: save progress at the start of each wave
+        // save progress at the start of each wave
         if (waveSave != null) waveSave.SaveWave(waveNumber);
 
-        // ✅ Show wave text
+        // show wave text
         ShowWaveText(waveNumber);
 
         StartCoroutine(SpawnWaveCoroutine(enemiesPerWave[currentWaveIndex]));
@@ -125,12 +143,11 @@ public class WaveManager : MonoBehaviour
         waveText.gameObject.SetActive(false);
     }
 
-    // ✅ NEW: call this from your Restart button
+    // call this from your Restart button (restart progress to wave 1 without reloading scene)
     public void RestartProgress()
     {
         if (waveSave != null) waveSave.ClearSave();
 
-        // reset values so it starts from Wave 1 again
         StopAllCoroutines();
         aliveCount = 0;
         currentWaveIndex = -1;
@@ -138,14 +155,14 @@ public class WaveManager : MonoBehaviour
         StartNextWave();
     }
 
-    // ✅ NEW: call this from your Quit button
-public void SaveAndQuitToMenu()
-{
-    int waveNumber = currentWaveIndex + 1;
+    // call this if you want to save progress then return to menu
+    public void SaveAndQuitToMenu()
+    {
+        int waveNumber = currentWaveIndex + 1;
 
-    if (waveSave != null)
-        waveSave.SaveWave(waveNumber);
+        if (waveSave != null)
+            waveSave.SaveWave(waveNumber);
 
-    SceneManager.LoadScene("MenuScene");  // must match exact scene name
-}
+        SceneManager.LoadScene("MenuScene"); // must match exact scene name
+    }
 }
