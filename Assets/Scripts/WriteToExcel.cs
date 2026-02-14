@@ -8,10 +8,9 @@ using NPOI.SS.UserModel;
 public class WriteToExcel : MonoBehaviour
 {
     [Header("User")]
-    public string userName = "User1"; // you can set from input field
+    public string userName = "User1";
 
     [Header("Tasks")]
-    // Edit this to match your lab tasks (colors / steps / sequence)
     public string[] taskNames = new string[] { "Task1", "Task2", "Task3" };
 
     // 0 = NotDone, 1 = Done, 2 = Skipped
@@ -21,31 +20,42 @@ public class WriteToExcel : MonoBehaviour
     public string sheetName = "sheet1";
     public bool createNewFileEachDay = true;
 
-    // Example output: Export/20260214_TestResult.xls
     private string excelPath;
+    private bool initialized = false;
 
     private void Awake()
     {
+        Init();
+    }
+
+    private void Init()
+    {
+        if (initialized) return;
+        initialized = true;
+
+        if (taskNames == null || taskNames.Length == 0)
+            taskNames = new string[] { "Task1", "Task2", "Task3" };
+
         taskStatus = new int[taskNames.Length];
-        for (int i = 0; i < taskStatus.Length; i++) taskStatus[i] = 0;
+        ResetTasks();
 
         string fileName = createNewFileEachDay
             ? DateTime.Now.ToString("yyyyMMdd") + "_TestResult.xls"
             : "TestResult.xls";
 
-        // IMPORTANT: save to ProjectRoot/Export (same level as Assets)
-        excelPath = Application.dataPath + "/../Export/" + fileName;
+        // ProjectRoot/Export (same level as Assets)
+        string exportDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Export"));
+        excelPath = Path.Combine(exportDir, fileName);
 
-        Debug.Log("Excel path: " + excelPath);
+        Debug.Log("Excel path used: " + excelPath);
 
         EnsureWorkbookReady();
     }
 
     // =========================
-    // Call these from buttons / triggers
+    // Public API (call from your game)
     // =========================
 
-    // Mark a task as DONE
     public void MarkTaskDone(int taskIndex)
     {
         if (!IsValidTask(taskIndex)) return;
@@ -53,7 +63,6 @@ public class WriteToExcel : MonoBehaviour
         Debug.Log($"Task {taskIndex} DONE");
     }
 
-    // Mark a task as SKIPPED (counts as fail if you want)
     public void MarkTaskSkipped(int taskIndex)
     {
         if (!IsValidTask(taskIndex)) return;
@@ -61,10 +70,10 @@ public class WriteToExcel : MonoBehaviour
         Debug.Log($"Task {taskIndex} SKIPPED");
     }
 
-    // Call this when testing phase ends (button/timer/sequence end)
     public void EndTestAndWriteRecord()
     {
-        // PASS only if all tasks are Done (no Skipped / NotDone)
+        if (!initialized) Init();
+
         bool pass = true;
         for (int i = 0; i < taskStatus.Length; i++)
         {
@@ -78,12 +87,12 @@ public class WriteToExcel : MonoBehaviour
         AppendRecordToExcel(userName, taskStatus, pass ? "PASS" : "FAIL");
         Debug.Log("Record saved: " + (pass ? "PASS" : "FAIL"));
 
-        // optional: reset for next run
         ResetTasks();
     }
 
     public void ResetTasks()
     {
+        if (taskStatus == null) return;
         for (int i = 0; i < taskStatus.Length; i++) taskStatus[i] = 0;
     }
 
@@ -93,49 +102,32 @@ public class WriteToExcel : MonoBehaviour
 
     private void EnsureWorkbookReady()
     {
-        // Ensure Export folder exists
         string exportDir = Path.GetDirectoryName(excelPath);
         if (!Directory.Exists(exportDir))
             Directory.CreateDirectory(exportDir);
 
         if (!File.Exists(excelPath))
         {
-            // Create new workbook + sheet + header + END row
             HSSFWorkbook book = new HSSFWorkbook();
             ISheet sheet = book.CreateSheet(sheetName);
 
             CreateHeaderRow(sheet);
             WriteEndRow(sheet);
 
-            using (FileStream fs = new FileStream(excelPath, FileMode.Create, FileAccess.Write))
-            {
-                book.Write(fs);
-            }
-
+            WriteWorkbookToDisk(book);
             Debug.Log("Created new Excel: " + excelPath);
         }
         else
         {
-            // Ensure header exists + ensure END exists
-            HSSFWorkbook book;
-            using (FileStream fs = new FileStream(excelPath, FileMode.Open, FileAccess.Read))
-            {
-                book = new HSSFWorkbook(fs);
-            }
-
+            HSSFWorkbook book = ReadWorkbookFromDisk();
             ISheet sheet = book.GetSheet(sheetName) ?? book.CreateSheet(sheetName);
 
-            // Create header if missing
             if (sheet.GetRow(0) == null || sheet.GetRow(0).GetCell(0) == null)
                 CreateHeaderRow(sheet);
 
-            // Ensure END row exists at bottom
             EnsureEndRow(sheet);
 
-            using (FileStream fs = new FileStream(excelPath, FileMode.Create, FileAccess.Write))
-            {
-                book.Write(fs);
-            }
+            WriteWorkbookToDisk(book);
         }
     }
 
@@ -143,47 +135,57 @@ public class WriteToExcel : MonoBehaviour
     {
         EnsureWorkbookReady();
 
-        HSSFWorkbook book;
-        using (FileStream fs = new FileStream(excelPath, FileMode.Open, FileAccess.Read))
-        {
-            book = new HSSFWorkbook(fs);
-        }
-
+        HSSFWorkbook book = ReadWorkbookFromDisk();
         ISheet sheet = book.GetSheet(sheetName) ?? book.CreateSheet(sheetName);
 
-        // Remove existing END row so we can append above it
+        // Remove END row so we append above it
         int endRowIndex = FindEndRowIndex(sheet);
         if (endRowIndex >= 0)
         {
-            sheet.RemoveRow(sheet.GetRow(endRowIndex));
+            IRow endRow = sheet.GetRow(endRowIndex);
+            if (endRow != null) sheet.RemoveRow(endRow);
         }
 
-        int nextRow = sheet.LastRowNum + 1;
-        if (nextRow < 1) nextRow = 1; // row 0 is header
+        int nextRowIndex = sheet.LastRowNum + 1;
+        if (nextRowIndex < 1) nextRowIndex = 1; // row 0 = header
 
-        IRow row = sheet.CreateRow(nextRow);
+        IRow row = sheet.CreateRow(nextRowIndex);
 
-        // Col 0: Timestamp
         row.CreateCell(0).SetCellValue(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-
-        // Col 1: Username
         row.CreateCell(1).SetCellValue(username);
 
-        // Col 2..: Task statuses
         for (int i = 0; i < statuses.Length; i++)
         {
             row.CreateCell(2 + i).SetCellValue(StatusToString(statuses[i]));
         }
 
-        // Last col: Result
         row.CreateCell(2 + statuses.Length).SetCellValue(result);
 
-        // Put END row again at bottom
+        // Add END row back
         WriteEndRow(sheet);
 
-        using (FileStream fs = new FileStream(excelPath, FileMode.Create, FileAccess.Write))
+        WriteWorkbookToDisk(book);
+
+        Debug.Log($"Wrote row {nextRowIndex} then -END- at bottom.");
+    }
+
+    private HSSFWorkbook ReadWorkbookFromDisk()
+    {
+        // Read fully into memory to avoid file locks
+        byte[] bytes = File.ReadAllBytes(excelPath);
+        using (MemoryStream ms = new MemoryStream(bytes))
+        {
+            return new HSSFWorkbook(ms);
+        }
+    }
+
+    private void WriteWorkbookToDisk(HSSFWorkbook book)
+    {
+        // Overwrite file safely (make sure Excel is CLOSED)
+        using (FileStream fs = new FileStream(excelPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
         {
             book.Write(fs);
+            fs.Flush();
         }
     }
 
@@ -214,18 +216,18 @@ public class WriteToExcel : MonoBehaviour
     private void EnsureEndRow(ISheet sheet)
     {
         int endRowIndex = FindEndRowIndex(sheet);
+
         if (endRowIndex < 0)
         {
             WriteEndRow(sheet);
+            return;
         }
-        else
+
+        if (endRowIndex != sheet.LastRowNum)
         {
-            // If END exists but not last row, remove and rewrite at bottom
-            if (endRowIndex != sheet.LastRowNum)
-            {
-                sheet.RemoveRow(sheet.GetRow(endRowIndex));
-                WriteEndRow(sheet);
-            }
+            IRow endRow = sheet.GetRow(endRowIndex);
+            if (endRow != null) sheet.RemoveRow(endRow);
+            WriteEndRow(sheet);
         }
     }
 
@@ -247,7 +249,6 @@ public class WriteToExcel : MonoBehaviour
 
     private string StatusToString(int s)
     {
-        // 0 NotDone, 1 Done, 2 Skipped
         if (s == 1) return "Done";
         if (s == 2) return "Skipped";
         return "NotDone";
@@ -266,17 +267,27 @@ public class WriteToExcel : MonoBehaviour
             Debug.LogError("Invalid task index: " + i);
             return false;
         }
+
         return true;
     }
-        void Update()
-{
-    if (Input.GetKeyDown(KeyCode.K))
+
+    // =========================
+    // Test trigger (press K)
+    // =========================
+    private void Update()
     {
-        MarkTaskDone(0);
-        MarkTaskDone(1);
-        MarkTaskDone(2);
-        EndTestAndWriteRecord();
-        Debug.Log("K pressed -> wrote record");
+        if (!initialized) return;
+
+        if (Input.GetKeyDown(KeyCode.K))
+        {
+            Debug.Log("K pressed -> writing test record (close Excel file first!)");
+
+            if (taskNames.Length > 0) MarkTaskDone(0);
+            if (taskNames.Length > 1) MarkTaskDone(1);
+            if (taskNames.Length > 2) MarkTaskDone(2);
+
+            EndTestAndWriteRecord();
+        }
     }
 }
-}
+

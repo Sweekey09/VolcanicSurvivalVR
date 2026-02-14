@@ -12,10 +12,22 @@ public class WinZone : MonoBehaviour
     {
         if (triggered) return;
 
-        // Works for VR rigs: XR Origin root OR CharacterController child
-        if (other.CompareTag("Player") || other.GetComponentInParent<CharacterController>() != null)
+        if (other.CompareTag("Player"))
         {
             triggered = true;
+
+            // ✅ Call Excel export instead of CSV
+            WriteToExcel excel = FindObjectOfType<WriteToExcel>();
+            if (excel != null)
+            {
+                excel.EndTestAndWriteRecord();
+                Debug.Log("Excel record written.");
+            }
+            else
+            {
+                Debug.LogError("WriteToExcel not found in scene!");
+            }
+
             SceneManager.LoadScene(winSceneName);
         }
     }
